@@ -24,6 +24,7 @@
                 "sap/m/VBox",
                 "sap/m/HBox",
                 "sap/m/Text",
+                "sap/m/Label",
                 "sap/m/Input",
                 "sap/m/SearchField",
                 "sap/m/List",
@@ -32,9 +33,10 @@
                 "sap/m/MessageToast",
                 "sap/m/MessageStrip",
                 "sap/m/Select",
+                "sap/m/CheckBox",
                 "sap/ui/core/Item",
                 "sap/ui/model/json/JSONModel"
-            ], function(App, Page, Button, VBox, HBox, Text, Input, SearchField, List, StandardListItem, Panel, MessageToast, MessageStrip, Select, Item, JSONModel) {
+            ], function(App, Page, Button, VBox, HBox, Text, Label, Input, SearchField, List, StandardListItem, Panel, MessageToast, MessageStrip, Select, CheckBox, Item, JSONModel) {
                 
                 // Modelo de dados para armazenar estado da aplicação
                 var oModel = new JSONModel({
@@ -44,12 +46,24 @@
                     totalPages: 1,
                     pageSize: 50,
                     searchQuery: "",
+                    sortField: "id",
+                    sortOrder: "asc",
                     loading: false,
                     localPriorities: {}, // Armazenamento local de prioridades por ID da tarefa
                     priorities: [
                         { key: "alta", text: "🔴 Alta Prioridade" },
                         { key: "media", text: "🟡 Média Prioridade" },
                         { key: "baixa", text: "🟢 Baixa Prioridade" }
+                    ],
+                    sortOptions: [
+                        { key: "id", text: "ID" },
+                        { key: "title", text: "Título" },
+                        { key: "userId", text: "Usuário" },
+                        { key: "completed", text: "Status" }
+                    ],
+                    orderOptions: [
+                        { key: "asc", text: "↑ Crescente" },
+                        { key: "desc", text: "↓ Decrescente" }
                     ]
                 });
                 
@@ -105,6 +119,100 @@
                     }
                 });
                 
+                // CheckBoxes para ordenação por campo
+                var oSortByIdCheckBox = new CheckBox({
+                    text: "ID",
+                    selected: true,
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oSortByTitleCheckBox.setSelected(false);
+                            oSortByUserCheckBox.setSelected(false);
+                            oSortByStatusCheckBox.setSelected(false);
+                            oModel.setProperty("/sortField", "id");
+                            oModel.setProperty("/currentPage", 1);
+                            MessageToast.show("📋 Ordenando por ID");
+                            loadTodos();
+                        }
+                    }
+                });
+                
+                var oSortByTitleCheckBox = new CheckBox({
+                    text: "Título",
+                    selected: false,
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oSortByIdCheckBox.setSelected(false);
+                            oSortByUserCheckBox.setSelected(false);
+                            oSortByStatusCheckBox.setSelected(false);
+                            oModel.setProperty("/sortField", "title");
+                            oModel.setProperty("/currentPage", 1);
+                            MessageToast.show("📝 Ordenando por Título");
+                            loadTodos();
+                        }
+                    }
+                });
+                
+                var oSortByUserCheckBox = new CheckBox({
+                    text: "Usuário",
+                    selected: false,
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oSortByIdCheckBox.setSelected(false);
+                            oSortByTitleCheckBox.setSelected(false);
+                            oSortByStatusCheckBox.setSelected(false);
+                            oModel.setProperty("/sortField", "userId");
+                            oModel.setProperty("/currentPage", 1);
+                            MessageToast.show("👤 Ordenando por Usuário");
+                            loadTodos();
+                        }
+                    }
+                });
+                
+                var oSortByStatusCheckBox = new CheckBox({
+                    text: "Status",
+                    selected: false,
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oSortByIdCheckBox.setSelected(false);
+                            oSortByTitleCheckBox.setSelected(false);
+                            oSortByUserCheckBox.setSelected(false);
+                            oModel.setProperty("/sortField", "completed");
+                            oModel.setProperty("/currentPage", 1);
+                            MessageToast.show("✅ Ordenando por Status");
+                            loadTodos();
+                        }
+                    }
+                });
+                
+                // CheckBoxes para ordem (crescente/decrescente)
+                var oSortAscCheckBox = new CheckBox({
+                    text: "↑ Crescente",
+                    selected: true,
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oSortDescCheckBox.setSelected(false);
+                            oModel.setProperty("/sortOrder", "asc");
+                            oModel.setProperty("/currentPage", 1);
+                            MessageToast.show("↑ Ordem Crescente");
+                            loadTodos();
+                        }
+                    }
+                });
+                
+                var oSortDescCheckBox = new CheckBox({
+                    text: "↓ Decrescente",
+                    selected: false,
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oSortAscCheckBox.setSelected(false);
+                            oModel.setProperty("/sortOrder", "desc");
+                            oModel.setProperty("/currentPage", 1);
+                            MessageToast.show("↓ Ordem Decrescente");
+                            loadTodos();
+                        }
+                    }
+                });
+                
                 // Campo de entrada para nova tarefa
                 var oNewTaskInput = new Input("newTaskInput", {
                     placeholder: "Digite o título da nova tarefa...",
@@ -119,44 +227,53 @@
                     value: "999"
                 });
                 
-                // RadioButtons para seleção de prioridade
-                var oAltaRadio = new sap.m.RadioButton({
-                    id: "altaRadio",
+                // CheckBoxes para seleção de prioridade (apenas uma pode ser selecionada)
+                var oAltaCheckBox = new CheckBox({
+                    id: "altaCheckBox",
                     text: "🔴 Alta prioridade",
-                    groupName: "priority",
                     selected: false,
-                    select: function() {
-                        sap.m.MessageToast.show("🔴 Alta prioridade selecionada");
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oMediaCheckBox.setSelected(false);
+                            oBaixaCheckBox.setSelected(false);
+                            MessageToast.show("🔴 Alta prioridade selecionada");
+                        }
                     }
                 });
                 
-                var oMediaRadio = new sap.m.RadioButton({
-                    id: "mediaRadio", 
+                var oMediaCheckBox = new CheckBox({
+                    id: "mediaCheckBox", 
                     text: "🟡 Média prioridade",
-                    groupName: "priority",
                     selected: false,
-                    select: function() {
-                        sap.m.MessageToast.show("🟡 Média prioridade selecionada");
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oAltaCheckBox.setSelected(false);
+                            oBaixaCheckBox.setSelected(false);
+                            MessageToast.show("🟡 Média prioridade selecionada");
+                        }
                     }
                 });
                 
-                var oBaixaRadio = new sap.m.RadioButton({
-                    id: "baixaRadio",
+                var oBaixaCheckBox = new CheckBox({
+                    id: "baixaCheckBox",
                     text: "🟢 Baixa prioridade", 
-                    groupName: "priority",
                     selected: false,
-                    select: function() {
-                        sap.m.MessageToast.show("🟢 Baixa prioridade selecionada");
+                    select: function(oEvent) {
+                        if (oEvent.getParameter("selected")) {
+                            oAltaCheckBox.setSelected(false);
+                            oMediaCheckBox.setSelected(false);
+                            MessageToast.show("🟢 Baixa prioridade selecionada");
+                        }
                     }
                 });
                 
-                // Container vertical para os RadioButtons  
-                var oPriorityContainer = new sap.m.VBox({
+                // Container vertical para os CheckBoxes  
+                var oPriorityContainer = new VBox({
                     items: [
-                        new sap.m.Label({ text: "Prioridade:" }).addStyleClass("sapUiTinyMarginBottom"),
-                        oAltaRadio,
-                        oMediaRadio,
-                        oBaixaRadio
+                        new Label({ text: "Prioridade:" }).addStyleClass("sapUiTinyMarginBottom"),
+                        oAltaCheckBox,
+                        oMediaCheckBox,
+                        oBaixaCheckBox
                     ]
                 }).addStyleClass("sapUiTinyMarginEnd");
                 
@@ -221,12 +338,14 @@
                     var currentPage = oModel.getProperty("/currentPage");
                     var pageSize = oModel.getProperty("/pageSize");
                     var searchQuery = oModel.getProperty("/searchQuery");
+                    var sortField = oModel.getProperty("/sortField");
+                    var sortOrder = oModel.getProperty("/sortOrder");
                     
                     oMessageStrip.setText("⏳ Carregando tarefas...");
                     oMessageStrip.setType("Information");
                     
-                    // Busca todas as tarefas primeiro, depois filtra e pagina no cliente
-                    var url = API_BASE + "/todos?page=1&pageSize=1000";
+                    // Busca todas as tarefas com ordenação
+                    var url = API_BASE + "/todos?page=1&pageSize=1000&sort=" + sortField + "&order=" + sortOrder;
                     
                     fetch(url, {
                         method: "GET",
@@ -298,31 +417,31 @@
                     var title = oNewTaskInput.getValue().trim();
                     var userId = parseInt(oUserIdInput.getValue()) || 999;
                     
-                    // Obtém prioridade selecionada dos RadioButtons
+                    // Obtém prioridade selecionada dos CheckBoxes
                     var priority = null;
-                    if (oAltaRadio.getSelected()) {
+                    if (oAltaCheckBox.getSelected()) {
                         priority = "alta";
-                    } else if (oBaixaRadio.getSelected()) {
+                    } else if (oBaixaCheckBox.getSelected()) {
                         priority = "baixa";
-                    } else if (oMediaRadio.getSelected()) {
+                    } else if (oMediaCheckBox.getSelected()) {
                         priority = "media";
                     }
                     
                     // Validações de entrada
                     if (!title) {
-                        sap.m.MessageToast.show("❌ Digite o título da tarefa!");
+                        MessageToast.show("❌ Digite o título da tarefa!");
                         oNewTaskInput.focus();
                         return;
                     }
                     
                     if (title.length < 3) {
-                        sap.m.MessageToast.show("❌ Título deve ter pelo menos 3 caracteres!");
+                        MessageToast.show("❌ Título deve ter pelo menos 3 caracteres!");
                         oNewTaskInput.focus();
                         return;
                     }
                     
                     if (!priority) {
-                        sap.m.MessageToast.show("❌ Selecione uma prioridade para a tarefa!");
+                        MessageToast.show("❌ Selecione uma prioridade para a tarefa!");
                         return;
                     }
                     
@@ -372,14 +491,14 @@
                         
                         // Limpa formulário
                         oNewTaskInput.setValue("");
-                        oAltaRadio.setSelected(false);
-                        oMediaRadio.setSelected(false);
-                        oBaixaRadio.setSelected(false);
+                        oAltaCheckBox.setSelected(false);
+                        oMediaCheckBox.setSelected(false);
+                        oBaixaCheckBox.setSelected(false);
                         oAddButton.setEnabled(true);
                         
                         var priorityIcon = priority === "alta" ? "🔴" : priority === "media" ? "🟡" : "🟢";
                         var priorityText = priority === "alta" ? "Alta" : priority === "media" ? "Média" : "Baixa";
-                        sap.m.MessageToast.show("✅ Tarefa '" + title + "' com prioridade " + priorityIcon + " " + priorityText + " adicionada!");
+                        MessageToast.show("✅ Tarefa '" + title + "' com prioridade " + priorityIcon + " " + priorityText + " adicionada!");
                         
                         // Volta para primeira página para ver nova tarefa
                         oModel.setProperty("/currentPage", 1);
@@ -528,12 +647,51 @@
                                         // Status Strip
                                         oMessageStrip,
                                         
-                                        // Search Panel
+                                        // Search and Sort Panel
                                         new Panel({
-                                            headerText: "🔍 Pesquisar Tarefas",
+                                            headerText: "🔍 Pesquisar e Ordenar",
                                             content: [
-                                                new HBox({
-                                                    items: [oSearchField, oClearButton]
+                                                new VBox({
+                                                    items: [
+                                                        // Campo de pesquisa
+                                                        new HBox({
+                                                            items: [oSearchField, oClearButton]
+                                                        }).addStyleClass("sapUiTinyMarginBottom"),
+                                                        
+                                                        // Seção de ordenação
+                                                        new VBox({
+                                                            items: [
+                                                                new Label({ 
+                                                                    text: "Ordenar por:",
+                                                                    design: "Bold"
+                                                                }).addStyleClass("sapUiTinyMarginBottom"),
+                                                                new HBox({
+                                                                    items: [
+                                                                        oSortByIdCheckBox,
+                                                                        oSortByTitleCheckBox,
+                                                                        oSortByUserCheckBox,
+                                                                        oSortByStatusCheckBox
+                                                                    ]
+                                                                }).addStyleClass("sapUiTinyMarginBottom")
+                                                            ]
+                                                        }).addStyleClass("sapUiTinyMarginBottom"),
+                                                        
+                                                        // Seção de ordem
+                                                        new VBox({
+                                                            items: [
+                                                                new Label({ 
+                                                                    text: "Ordem:",
+                                                                    design: "Bold"
+                                                                }).addStyleClass("sapUiTinyMarginBottom"),
+                                                                new HBox({
+                                                                    items: [
+                                                                        oSortAscCheckBox,
+                                                                        oSortDescCheckBox
+                                                                    ]
+                                                                })
+                                                            ]
+                                                        })
+                                                    ]
                                                 })
                                             ]
                                         }),
