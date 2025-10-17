@@ -5,8 +5,13 @@ using TodoApi.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
-builder.Services.AddDbContext<TodoContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Não adiciona SQLite durante testes - os testes configurarão InMemoryDatabase
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddDbContext<TodoContext>(options =>
+        options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+}
 
 builder.Services.AddHttpClient<ITodoSyncService, TodoSyncService>();
 builder.Services.AddScoped<ITodoSyncService, TodoSyncService>();
@@ -31,10 +36,11 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+// app.UseHttpsRedirection();
 app.UseCors("AllowSAPUI5");
 app.MapControllers();
 
+// Não criar banco de dados durante testes de integração
 if (!app.Environment.IsEnvironment("Testing"))
 {
     using (var scope = app.Services.CreateScope())

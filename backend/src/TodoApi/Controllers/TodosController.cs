@@ -23,9 +23,9 @@ public class TodosController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<PaginatedResponse<TodoDto>>> GetTodos(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
+    public async Task<ActionResult<object>> GetTodos(
+        [FromQuery] int? page = null,
+        [FromQuery] int? pageSize = null,
         [FromQuery] string? title = null,
         [FromQuery] bool? completed = null,
         [FromQuery] string sort = "id",
@@ -54,12 +54,29 @@ public class TodosController : ControllerBase
             _ => order.ToLower() == "desc" ? query.OrderByDescending(t => t.Id) : query.OrderBy(t => t.Id)
         };
 
-        var totalCount = await query.CountAsync();
-        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+        // Se page e pageSize não forem especificados, retorna lista simples
+        if (!page.HasValue || !pageSize.HasValue)
+        {
+            var todos = await query
+                .Select(t => new TodoDto
+                {
+                    Id = t.Id,
+                    UserId = t.UserId,
+                    Title = t.Title,
+                    Completed = t.Completed
+                })
+                .ToListAsync();
 
-        var todos = await query
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            return Ok(todos);
+        }
+
+        // Caso contrário, retorna paginado
+        var totalCount = await query.CountAsync();
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize.Value);
+
+        var todosPaginated = await query
+            .Skip((page.Value - 1) * pageSize.Value)
+            .Take(pageSize.Value)
             .Select(t => new TodoDto
             {
                 Id = t.Id,
@@ -71,9 +88,9 @@ public class TodosController : ControllerBase
 
         var response = new PaginatedResponse<TodoDto>
         {
-            Data = todos,
-            Page = page,
-            PageSize = pageSize,
+            Data = todosPaginated,
+            Page = page.Value,
+            PageSize = pageSize.Value,
             TotalCount = totalCount,
             TotalPages = totalPages
         };
@@ -128,15 +145,23 @@ public class TodosController : ControllerBase
         // todo.Priority = updateDto.Priority ?? todo.Priority; // Temporarily disabled until column exists
         await _context.SaveChangesAsync();
 
-        var updatedTodoDto = new TodoDto
-        {
-            Id = todo.Id,
-            Title = todo.Title,
-            UserId = todo.UserId,
-            Completed = todo.Completed
-        };
+        return NoContent();
+    }
 
-        return Ok(updatedTodoDto);
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeleteTodo(int id)
+    {
+        var todo = await _context.Todos.FindAsync(id);
+
+        if (todo == null)
+        {
+            return NotFound();
+        }
+
+        _context.Todos.Remove(todo);
+        await _context.SaveChangesAsync();
+
+        return NoContent();
     }
 
     [HttpPost]
