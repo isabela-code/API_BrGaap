@@ -1,0 +1,31 @@
+@TodoApi_HostAddress = http://localhost:5103
+
+### Test TodoApi Endpoints
+
+### Get all todos with pagination
+GET {{TodoApi_HostAddress}}/todos?page=1&pageSize=10
+Accept: application/json
+
+### Get todos with title filter
+GET {{TodoApi_HostAddress}}/todos?title=test
+Accept: application/json
+
+### Get todos with sorting
+GET {{TodoApi_HostAddress}}/todos?sort=title&order=asc
+Accept: application/json
+
+### Get specific todo
+GET {{TodoApi_HostAddress}}/todos/1
+Accept: application/json
+
+### Sync todos from JSONPlaceholder
+POST {{TodoApi_HostAddress}}/todos/sync
+Accept: application/json
+
+### Update todo completion status
+PUT {{TodoApi_HostAddress}}/todos/1
+Content-Type: application/json
+
+{
+  "completed": true
+}

@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Todo App - SAPUI5</title>
+    
+    <script id="sap-ui-bootstrap"
+        src="https://ui5.sap.com/1.120.0/resources/sap-ui-core.js"
+        data-sap-ui-theme="sap_horizon"
+        data-sap-ui-libs="sap.m,sap.ui.core"
+        data-sap-ui-async="true">
+    </script>
+    
+    <script>
+        sap.ui.getCore().attachInit(function() {
+            // Oculta o loading inicial
+            var loading = document.getElementById('loading');
+            if (loading) loading.style.display = 'none';
+            
+            sap.ui.require([
+                "sap/m/App",
+                "sap/m/Page", 
+                "sap/m/Button",
+                "sap/m/VBox",
+                "sap/m/HBox",
+                "sap/m/Text",
+                "sap/m/Input",
+                "sap/m/SearchField",
+                "sap/m/List",
+                "sap/m/StandardListItem",
+                "sap/m/Panel",
+                "sap/m/MessageToast",
+                "sap/m/MessageStrip",
+                "sap/m/Select",
+                "sap/ui/core/Item",
+                "sap/ui/model/json/JSONModel"
+            ], function(App, Page, Button, VBox, HBox, Text, Input, SearchField, List, StandardListItem, Panel, MessageToast, MessageStrip, Select, Item, JSONModel) {
+                
+                // Modelo de dados para armazenar estado da aplicação
+                var oModel = new JSONModel({
+                    todos: [],
+                    totalCount: 0,
+                    currentPage: 1,
+                    totalPages: 1,
+                    pageSize: 50,
+                    searchQuery: "",
+                    loading: false,
+                    localPriorities: {}, // Armazenamento local de prioridades por ID da tarefa
+                    priorities: [
+                        { key: "alta", text: "🔴 Alta Prioridade" },
+                        { key: "media", text: "🟡 Média Prioridade" },
+                        { key: "baixa", text: "🟢 Baixa Prioridade" }
+                    ]
+                });
+                
+                var API_BASE = "http://localhost:5103";
+                
+                // Carrega prioridades salvas do localStorage
+                function loadSavedPriorities() {
+                    try {
+                        var savedPriorities = localStorage.getItem("todoPriorities");
+                        if (savedPriorities) {
+                            var priorities = JSON.parse(savedPriorities);
+                            oModel.setProperty("/localPriorities", priorities);
+                        }
+                    } catch (error) {
+                        console.error("Erro ao carregar prioridades salvas:", error);
+                    }
+                }
+                
+                // Barra de status para feedback ao usuário
+                var oMessageStrip = new MessageStrip("statusStrip", {
+                    text: "SAPUI5 Todo App carregado - carregando tarefas...",
+                    type: "Information"
+                });
+                
+                // Campo de pesquisa com busca em tempo real
+                var oSearchField = new SearchField("searchField", {
+                    placeholder: "Digite para pesquisar tarefas...",
+                    width: "300px",
+                    search: function(oEvent) {
+                        var query = oEvent.getParameter("query") || oEvent.getSource().getValue();
+                        oModel.setProperty("/searchQuery", query);
+                        oModel.setProperty("/currentPage", 1);
+                        loadTodos();
+                    },
+                    liveChange: function(oEvent) {
+                        var query = oEvent.getParameter("newValue");
+                        oModel.setProperty("/searchQuery", query);
+                        oModel.setProperty("/currentPage", 1);
+                        loadTodos();
+                    }
+                });
+                
+                // Botão para limpar a pesquisa
+                var oClearButton = new Button("clearButton", {
+                    text: "Limpar",
+                    type: "Transparent",
+                    press: function() {
+                        oSearchField.setValue("");
+                        oModel.setProperty("/searchQuery", "");
+                        oModel.setProperty("/currentPage", 1);
+                        MessageToast.show("Busca limpa!");
+                        loadTodos();
+                    }
+                });
+                
+                // Campo de entrada para nova tarefa
+                var oNewTaskInput = new Input("newTaskInput", {
+                    placeholder: "Digite o título da nova tarefa...",
+                    width: "400px"
+                });
+                
+                // Campo para ID do usuário
+                var oUserIdInput = new Input("userIdInput", {
+                    placeholder: "ID do Usuário",
+                    type: "Number",
+                    width: "120px",
+                    value: "999"
+                });
+                
+                // RadioButtons para seleção de prioridade
+                var oAltaRadio = new sap.m.RadioButton({
+                    id: "altaRadio",
+                    text: "🔴 Alta prioridade",
+                    groupName: "priority",
+                    selected: false,
+                    select: function() {
+                        sap.m.MessageToast.show("🔴 Alta prioridade selecionada");
+                    }
+                });
+                
+                var oMediaRadio = new sap.m.RadioButton({
+                    id: "mediaRadio", 
+                    text: "🟡 Média prioridade",
+                    groupName: "priority",
+                    selected: false,
+                    select: function() {
+                        sap.m.MessageToast.show("🟡 Média prioridade selecionada");
+                    }
+                });
+                
+                var oBaixaRadio = new sap.m.RadioButton({
+                    id: "baixaRadio",
+                    text: "🟢 Baixa prioridade", 
+                    groupName: "priority",
+                    selected: false,
+                    select: function() {
+                        sap.m.MessageToast.show("🟢 Baixa prioridade selecionada");
+                    }
+                });
+                
+                // Container vertical para os RadioButtons  
+                var oPriorityContainer = new sap.m.VBox({
+                    items: [
+                        new sap.m.Label({ text: "Prioridade:" }).addStyleClass("sapUiTinyMarginBottom"),
+                        oAltaRadio,
+                        oMediaRadio,
+                        oBaixaRadio
+                    ]
+                }).addStyleClass("sapUiTinyMarginEnd");
+                
+                // Botão para adicionar nova tarefa
+                var oAddButton = new Button("addButton", {
+                    text: "Adicionar Tarefa",
+                    type: "Emphasized",
+                    press: function() {
+                        addTodo();
+                    }
+                });
+                
+                // Suporte para tecla Enter no campo de nova tarefa
+                oNewTaskInput.attachBrowserEvent("keypress", function(oEvent) {
+                    if (oEvent.which === 13 || oEvent.keyCode === 13) {
+                        addTodo();
+                    }
+                });
+                
+                // Lista principal de tarefas
+                var oTodoList = new List("todoList", {
+                    headerText: "Lista de Tarefas",
+                    noDataText: "Nenhuma tarefa encontrada"
+                });
+                
+                // Texto informativo da paginação
+                var oPaginationInfo = new Text("paginationInfo", {
+                    text: "Carregando..."
+                });
+                
+                // Botão para página anterior
+                var oPrevButton = new Button("prevButton", {
+                    text: "← Anterior",
+                    enabled: false,
+                    press: function() {
+                        var currentPage = oModel.getProperty("/currentPage");
+                        if (currentPage > 1) {
+                            oModel.setProperty("/currentPage", currentPage - 1);
+                            loadTodos();
+                        }
+                    }
+                });
+                
+                // Botão para próxima página
+                var oNextButton = new Button("nextButton", {
+                    text: "Próxima →",
+                    enabled: false,
+                    press: function() {
+                        var currentPage = oModel.getProperty("/currentPage");
+                        var totalPages = oModel.getProperty("/totalPages");
+                        if (currentPage < totalPages) {
+                            oModel.setProperty("/currentPage", currentPage + 1);
+                            loadTodos();
+                        }
+                    }
+                });
+                
+                // Função para carregar tarefas da API com filtros e paginação
+                function loadTodos() {
+                    oModel.setProperty("/loading", true);
+                    
+                    var currentPage = oModel.getProperty("/currentPage");
+                    var pageSize = oModel.getProperty("/pageSize");
+                    var searchQuery = oModel.getProperty("/searchQuery");
+                    
+                    oMessageStrip.setText("⏳ Carregando tarefas...");
+                    oMessageStrip.setType("Information");
+                    
+                    // Busca todas as tarefas primeiro, depois filtra e pagina no cliente
+                    var url = API_BASE + "/todos?page=1&pageSize=1000";
+                    
+                    fetch(url, {
+                        method: "GET",
+                        headers: {
+                            "Accept": "application/json"
+                        }
+                    })
+                        .then(response => {
+                            if (!response.ok) {
+                                return response.text().then(text => {
+                                    throw new Error("HTTP " + response.status + ": " + text);
+                                });
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            var allTodos = data.data || [];
+                            
+                            // Filtro de pesquisa no lado cliente
+                            var filteredTodos = allTodos;
+                            if (searchQuery && searchQuery.trim()) {
+                                var query = searchQuery.toLowerCase().trim();
+                                filteredTodos = allTodos.filter(function(todo) {
+                                    return todo.title.toLowerCase().includes(query) ||
+                                           todo.id.toString().includes(query) ||
+                                           todo.userId.toString().includes(query);
+                                });
+                            }
+                            
+                            // Paginação no lado cliente
+                            var totalCount = filteredTodos.length;
+                            var totalPages = Math.ceil(totalCount / pageSize) || 1;
+                            var startIndex = (currentPage - 1) * pageSize;
+                            var endIndex = startIndex + pageSize;
+                            var paginatedTodos = filteredTodos.slice(startIndex, endIndex);
+                            
+                            oModel.setProperty("/todos", paginatedTodos);
+                            oModel.setProperty("/totalCount", totalCount);
+                            oModel.setProperty("/totalPages", totalPages);
+                            oModel.setProperty("/loading", false);
+                            
+                            // Atualiza a interface
+                            updateTodoList();
+                            updatePagination();
+                            
+                            var message = "✅ " + paginatedTodos.length + " de " + totalCount + " tarefas";
+                            if (searchQuery && searchQuery.trim()) {
+                                message += " (pesquisa: '" + searchQuery + "')";
+                            }
+                            oMessageStrip.setText(message);
+                            oMessageStrip.setType("Success");
+                        })
+                        .catch(error => {
+                            console.error("Erro ao carregar todos:", error);
+                            oModel.setProperty("/loading", false);
+                            oModel.setProperty("/todos", []);
+                            oModel.setProperty("/totalCount", 0);
+                            
+                            updateTodoList();
+                            updatePagination();
+                            
+                            oMessageStrip.setText("❌ Erro ao carregar tarefas: " + error.message);
+                            oMessageStrip.setType("Error");
+                        });
+                }
+                
+                // Função para adicionar nova tarefa
+                function addTodo() {
+                    var title = oNewTaskInput.getValue().trim();
+                    var userId = parseInt(oUserIdInput.getValue()) || 999;
+                    
+                    // Obtém prioridade selecionada dos RadioButtons
+                    var priority = null;
+                    if (oAltaRadio.getSelected()) {
+                        priority = "alta";
+                    } else if (oBaixaRadio.getSelected()) {
+                        priority = "baixa";
+                    } else if (oMediaRadio.getSelected()) {
+                        priority = "media";
+                    }
+                    
+                    // Validações de entrada
+                    if (!title) {
+                        sap.m.MessageToast.show("❌ Digite o título da tarefa!");
+                        oNewTaskInput.focus();
+                        return;
+                    }
+                    
+                    if (title.length < 3) {
+                        sap.m.MessageToast.show("❌ Título deve ter pelo menos 3 caracteres!");
+                        oNewTaskInput.focus();
+                        return;
+                    }
+                    
+                    if (!priority) {
+                        sap.m.MessageToast.show("❌ Selecione uma prioridade para a tarefa!");
+                        return;
+                    }
+                    
+                    oMessageStrip.setText("⏳ Adicionando tarefa: " + title + "...");
+                    oMessageStrip.setType("Information");
+                    
+                    // Desabilita botão durante requisição
+                    oAddButton.setEnabled(false);
+                    
+                    var todoData = {
+                        title: title,
+                        userId: userId,
+                        completed: false
+                    };
+                    
+                    fetch(API_BASE + "/todos", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json"
+                        },
+                        body: JSON.stringify(todoData)
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.text().then(text => {
+                                throw new Error("HTTP " + response.status + ": " + text);
+                            });
+                        }
+                        
+                        // Verifica se resposta tem conteúdo antes de fazer parse JSON
+                        const contentLength = response.headers.get("content-length");
+                        if (response.status === 204 || contentLength === "0") {
+                            return { id: Date.now(), title: title, userId: userId, completed: false, priority: priority };
+                        }
+                        
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Salva prioridade localmente para esta tarefa
+                        var localPriorities = oModel.getProperty("/localPriorities");
+                        localPriorities[data.id] = priority;
+                        oModel.setProperty("/localPriorities", localPriorities);
+                        
+                        // Salva no localStorage para persistência
+                        localStorage.setItem("todoPriorities", JSON.stringify(localPriorities));
+                        
+                        // Limpa formulário
+                        oNewTaskInput.setValue("");
+                        oAltaRadio.setSelected(false);
+                        oMediaRadio.setSelected(false);
+                        oBaixaRadio.setSelected(false);
+                        oAddButton.setEnabled(true);
+                        
+                        var priorityIcon = priority === "alta" ? "🔴" : priority === "media" ? "🟡" : "🟢";
+                        var priorityText = priority === "alta" ? "Alta" : priority === "media" ? "Média" : "Baixa";
+                        sap.m.MessageToast.show("✅ Tarefa '" + title + "' com prioridade " + priorityIcon + " " + priorityText + " adicionada!");
+                        
+                        // Volta para primeira página para ver nova tarefa
+                        oModel.setProperty("/currentPage", 1);
+                        loadTodos();
+                    })
+                    .catch(error => {
+                        console.error("Erro ao adicionar tarefa:", error);
+                        oAddButton.setEnabled(true);
+                        oMessageStrip.setText("❌ Erro ao adicionar tarefa: " + error.message);
+                        oMessageStrip.setType("Error");
+                        MessageToast.show("❌ Erro: " + error.message);
+                    });
+                }
+                
+                // Função para atualizar a lista de tarefas na interface
+                function updateTodoList() {
+                    oTodoList.destroyItems();
+                    var todos = oModel.getProperty("/todos");
+                    
+                    todos.forEach(function(todo, index) {
+                        // Obtém prioridade do armazenamento local ou usa padrão
+                        var localPriorities = oModel.getProperty("/localPriorities");
+                        var todoPriority = localPriorities[todo.id] || "media";
+                        
+                        var priorityIcon = "🟡";
+                        var priorityText = "Média";
+                        if (todoPriority === "alta") {
+                            priorityIcon = "🔴";
+                            priorityText = "Alta";
+                        } else if (todoPriority === "baixa") {
+                            priorityIcon = "🟢";
+                            priorityText = "Baixa";
+                        }
+                        
+                        var statusIcon = todo.completed ? "✅" : "⏳";
+                        var statusText = todo.completed ? "Completa" : "Pendente";
+                        
+                        var description = "ID: " + todo.id + " | Usuário: " + todo.userId + 
+                                        " | Prioridade: " + priorityIcon + " " + priorityText + 
+                                        " | Status: " + statusIcon + " " + statusText;
+                        
+                        var oListItem = new StandardListItem("todoItem_" + todo.id, {
+                            title: todo.title,
+                            description: description,
+                            icon: todo.completed ? "sap-icon://accept" : "sap-icon://pending",
+                            iconInset: false,
+                            type: "Active",
+                            press: function() {
+                                toggleTodo(todo);
+                            }
+                        });
+                        
+                        oTodoList.addItem(oListItem);
+                    });
+                }
+                
+                // Função para alternar status de conclusão da tarefa
+                function toggleTodo(todo) {
+                    var newStatus = !todo.completed;
+                    var statusText = newStatus ? "Completa" : "Pendente";
+                    
+                    oMessageStrip.setText("⏳ Alterando status para: " + statusText + "...");
+                    oMessageStrip.setType("Information");
+                    
+                    var updateData = {
+                        title: todo.title,
+                        userId: todo.userId,
+                        completed: newStatus
+                    };
+                    
+                    fetch(API_BASE + "/todos/" + todo.id, {
+                        method: "PUT",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json"
+                        },
+                        body: JSON.stringify(updateData)
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.text().then(text => {
+                                throw new Error("HTTP " + response.status + ": " + text);
+                            });
+                        }
+                        
+                        // Verifica se resposta tem conteúdo antes de fazer parse JSON
+                        const contentLength = response.headers.get("content-length");
+                        if (response.status === 204 || contentLength === "0") {
+                            return {};
+                        }
+                        
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Atualiza modelo local imediatamente
+                        var todos = oModel.getProperty("/todos");
+                        var todoIndex = todos.findIndex(function(t) { return t.id === todo.id; });
+                        if (todoIndex >= 0) {
+                            todos[todoIndex].completed = newStatus;
+                            oModel.setProperty("/todos", todos);
+                            updateTodoList();
+                        }
+                        
+                        var statusIcon = newStatus ? "✅" : "⏳";
+                        MessageToast.show(statusIcon + " Status alterado para: " + statusText);
+                        oMessageStrip.setText("✅ Status da tarefa alterado!");
+                        oMessageStrip.setType("Success");
+                        
+                        // Recarrega para garantir consistência dos dados
+                        setTimeout(function() {
+                            loadTodos();
+                        }, 1000);
+                    })
+                    .catch(error => {
+                        console.error("Erro ao alterar status:", error);
+                        MessageToast.show("❌ Erro ao alterar status: " + error.message);
+                        oMessageStrip.setText("❌ Erro ao alterar status: " + error.message);
+                        oMessageStrip.setType("Error");
+                    });
+                }
+                
+                // Função para atualizar informações de paginação
+                function updatePagination() {
+                    var currentPage = oModel.getProperty("/currentPage");
+                    var totalPages = oModel.getProperty("/totalPages");
+                    var totalCount = oModel.getProperty("/totalCount");
+                    var pageSize = oModel.getProperty("/pageSize");
+                    
+                    var startItem = ((currentPage - 1) * pageSize) + 1;
+                    var endItem = Math.min(currentPage * pageSize, totalCount);
+                    
+                    oPaginationInfo.setText("Mostrando " + startItem + "-" + endItem + " de " + totalCount + " tarefas (Página " + currentPage + " de " + totalPages + ")");
+                    
+                    oPrevButton.setEnabled(currentPage > 1);
+                    oNextButton.setEnabled(currentPage < totalPages);
+                }
+                
+                // Criação da aplicação SAPUI5
+                var oApp = new App("todoApp", {
+                    pages: [
+                        new Page("mainPage", {
+                            title: "📝 Todo App - SAPUI5",
+                            content: [
+                                new VBox({
+                                    items: [
+                                        // Status Strip
+                                        oMessageStrip,
+                                        
+                                        // Search Panel
+                                        new Panel({
+                                            headerText: "🔍 Pesquisar Tarefas",
+                                            content: [
+                                                new HBox({
+                                                    items: [oSearchField, oClearButton]
+                                                })
+                                            ]
+                                        }),
+                                        
+                                        // Add Task Panel
+                                        new Panel({
+                                            headerText: "➕ Adicionar Nova Tarefa",
+                                            content: [
+                                                new VBox({
+                                                    items: [
+                                                        new HBox({
+                                                            items: [oNewTaskInput, oUserIdInput]
+                                                        }),
+                                                        new HBox({
+                                                            items: [
+                                                                oPriorityContainer, 
+                                                                oAddButton
+                                                            ]
+                                                        }).addStyleClass("sapUiTinyMarginTop")
+                                                    ]
+                                                })
+                                            ]
+                                        }),
+                                        
+                                        // Todo List Panel
+                                        new Panel({
+                                            headerText: "📋 Lista de Tarefas",
+                                            content: [oTodoList]
+                                        }),
+                                        
+                                        // Pagination Panel
+                                        new Panel({
+                                            headerText: "📄 Paginação",
+                                            content: [
+                                                new VBox({
+                                                    items: [
+                                                        oPaginationInfo,
+                                                        new HBox({
+                                                            items: [oPrevButton, oNextButton]
+                                                        })
+                                                    ]
+                                                })
+                                            ]
+                                        })
+                                    ]
+                                })
+                            ]
+                        })
+                    ]
+                });
+                
+                // Renderiza a aplicação
+                var content = document.getElementById("content");
+                content.innerHTML = "";
+                oApp.placeAt("content");
+                
+                // Carrega prioridades salvas e depois as tarefas
+                loadSavedPriorities();
+                loadTodos();
+                
+            });
+        });
+    </script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        
+        #content {
+            min-height: 100vh;
+            background: #f5f5f5;
+        }
+        
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            z-index: 9999;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #0073e6;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+
+<body class="sapUiBody" id="content">
+    <div id="loading">
+        <div class="spinner"></div>
+        <h2>🚀 Carregando SAPUI5</h2>
+        <p>Com TODAS as funcionalidades!</p>
+        <p>✅ Pesquisa ✅ Adicionar ✅ Paginação ✅ API</p>
+        <p><a href="working.html" style="color: blue;">Versão HTML backup</a></p>
+    </div>
+</body>
+</html>
